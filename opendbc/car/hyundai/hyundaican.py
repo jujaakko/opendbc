@@ -57,11 +57,6 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
     # Note: the warning is hidden while the blinkers are on
     values["CF_Lkas_SysWarning"] = 4 if sys_warning else 0
 
-  elif CP.carFingerprint in (CAR.KIA_CEED, CAR.KIA_CEED_PHEV):
-    values["CF_Lkas_LdwsActivemode"] = int(left_lane) + (int(right_lane) << 1)
-    values["CF_Lkas_LdwsOpt_USM"] = 2
-    values["CF_Lkas_SysWarning"] = 4 if sys_warning else 0
-
   # Likely cars lacking the ability to show individual lane lines in the dash
   elif CP.carFingerprint in (CAR.KIA_OPTIMA_G4, CAR.KIA_OPTIMA_G4_FL):
     # SysWarning 4 = keep hands on wheel + beep
