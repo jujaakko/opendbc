@@ -25,32 +25,25 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
     "CF_Lkas_FcwOpt_USM",
     "CF_Lkas_LdwsOpt_USM",
   ]}
-  values["CF_Lkas_LdwsSysState"] = sys_state
-  values["CF_Lkas_SysWarning"] = 3 if sys_warning else 0
-  values["CF_Lkas_LdwsLHWarning"] = left_lane_depart
-  values["CF_Lkas_LdwsRHWarning"] = right_lane_depart
-  values["CR_Lkas_StrToqReq"] = apply_torque
-  values["CF_Lkas_ActToi"] = steer_req
-  values["CF_Lkas_ToiFlt"] = torque_fault  # seems to allow actuation on CR_Lkas_StrToqReq
-  values["CF_Lkas_MsgCount"] = frame % 0x10
-
   if CP.carFingerprint == CAR.KIA_CEED_PHEV:
-    # FCA / forward radar: LKAS11 carries FCW state the cluster and AEB stack expect to stay
-    # consistent with the camera. Openpilot's HUD fields (LdwsSysState / SysWarning above) and
-    # the forced FcwOpt_USM path used on other Hyundais cause "Check Forward Collision-Avoidance
-    # Assist" on Ceed PHEV. Ceed PHEV is not in that FcwOpt_USM branch; explicitly keep all FCW
-    # bits from the camera so nothing later can drift from stock semantics.
-    for _k in (
-      "CF_Lkas_FcwBasReq",
-      "CF_Lkas_FcwOpt",
-      "CF_Lkas_FcwSysState",
-      "CF_Lkas_FcwCollisionWarning",
-      "CF_Lkas_FusionState",
-      "CF_Lkas_FcwOpt_USM",
-    ):
-      values[_k] = lkas11[_k]
-    values["CF_Lkas_LdwsSysState"] = lkas11["CF_Lkas_LdwsSysState"]
-    values["CF_Lkas_SysWarning"] = lkas11["CF_Lkas_SysWarning"]
+    # Kia Ceed PHEV: inject steering only. Any OP HUD override (SysWarning, LdwsSysState, lane
+    # depart, FCW bits) can desync the camera vs radar/AEB and triggers "Check Forward
+    # Collision-Avoidance Assist" / lane-keeping assist faults on the cluster.
+    # Similar EU Kia platforms have been shown to fault when forwarding the stock FusionState.
+    values["CF_Lkas_FusionState"] = 0
+    values["CR_Lkas_StrToqReq"] = apply_torque
+    values["CF_Lkas_ActToi"] = steer_req
+    values["CF_Lkas_ToiFlt"] = torque_fault  # seems to allow actuation on CR_Lkas_StrToqReq
+    values["CF_Lkas_MsgCount"] = frame % 0x10
+  else:
+    values["CF_Lkas_LdwsSysState"] = sys_state
+    values["CF_Lkas_SysWarning"] = 3 if sys_warning else 0
+    values["CF_Lkas_LdwsLHWarning"] = left_lane_depart
+    values["CF_Lkas_LdwsRHWarning"] = right_lane_depart
+    values["CR_Lkas_StrToqReq"] = apply_torque
+    values["CF_Lkas_ActToi"] = steer_req
+    values["CF_Lkas_ToiFlt"] = torque_fault  # seems to allow actuation on CR_Lkas_StrToqReq
+    values["CF_Lkas_MsgCount"] = frame % 0x10
 
   if CP.carFingerprint in (CAR.HYUNDAI_SONATA, CAR.HYUNDAI_PALISADE, CAR.KIA_NIRO_EV, CAR.KIA_NIRO_HEV_2021, CAR.KIA_NIRO_PHEV_2022, CAR.HYUNDAI_SANTA_FE,
                            CAR.HYUNDAI_IONIQ_EV_2020, CAR.HYUNDAI_IONIQ_PHEV, CAR.KIA_SELTOS, CAR.HYUNDAI_ELANTRA_2021, CAR.GENESIS_G70_2020,
