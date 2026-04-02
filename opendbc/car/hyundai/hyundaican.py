@@ -26,13 +26,26 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
     "CF_Lkas_LdwsOpt_USM",
   ]}
   if CP.carFingerprint == CAR.KIA_CEED_PHEV:
-    # Kia Ceed PHEV: inject steering only. Any OP HUD override (SysWarning, LdwsSysState, lane
-    # depart, FCW bits) can desync the camera vs radar/AEB and triggers "Check Forward
-    # Collision-Avoidance Assist" / lane-keeping assist faults on the cluster.
     values["CR_Lkas_StrToqReq"] = apply_torque
     values["CF_Lkas_ActToi"] = steer_req
-    values["CF_Lkas_ToiFlt"] = torque_fault  # seems to allow actuation on CR_Lkas_StrToqReq
+    values["CF_Lkas_ToiFlt"] = torque_fault
     values["CF_Lkas_MsgCount"] = frame % 0x10
+    if steer_req:
+      # When OP steers, the camera detects the override and enters a fault state
+      # (sysSt=15, warn=15, FcwOpt_USM=4, LdwsOpt_USM=7, FusionState=1).
+      # Passing those through triggers "Check FCA" and "Check LKA" on the cluster.
+      # Override display/status signals with the camera's idle baseline values.
+      # FcwBasReq and FcwCollisionWarning are passed through from camera so the
+      # camera can still request emergency braking via ABS/ESC if needed.
+      values["CF_Lkas_LdwsSysState"] = 0
+      values["CF_Lkas_SysWarning"] = 0
+      values["CF_Lkas_LdwsLHWarning"] = 0
+      values["CF_Lkas_LdwsRHWarning"] = 0
+      values["CF_Lkas_LdwsActivemode"] = 0
+      values["CF_Lkas_FcwSysState"] = 0
+      values["CF_Lkas_FusionState"] = 0
+      values["CF_Lkas_FcwOpt_USM"] = 1
+      values["CF_Lkas_LdwsOpt_USM"] = 2
   else:
     values["CF_Lkas_LdwsSysState"] = sys_state
     values["CF_Lkas_SysWarning"] = 3 if sys_warning else 0
