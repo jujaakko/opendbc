@@ -29,8 +29,6 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
     # Kia Ceed PHEV: inject steering only. Any OP HUD override (SysWarning, LdwsSysState, lane
     # depart, FCW bits) can desync the camera vs radar/AEB and triggers "Check Forward
     # Collision-Avoidance Assist" / lane-keeping assist faults on the cluster.
-    # Similar EU Kia platforms have been shown to fault when forwarding the stock FusionState.
-    values["CF_Lkas_FusionState"] = 0
     values["CR_Lkas_StrToqReq"] = apply_torque
     values["CF_Lkas_ActToi"] = steer_req
     values["CF_Lkas_ToiFlt"] = torque_fault  # seems to allow actuation on CR_Lkas_StrToqReq
