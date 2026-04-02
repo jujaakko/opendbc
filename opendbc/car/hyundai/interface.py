@@ -144,6 +144,11 @@ class CarInterface(CarInterfaceBase):
     elif ret.flags & HyundaiFlags.FCEV:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.FCEV_GAS.value
 
+    # Block camera FCA11 for Kia Ceed PHEV: the camera sends FCA_Failinfo=3 when it
+    # detects OP's steering override, triggering "Check FCA system" on the cluster.
+    if candidate == CAR.KIA_CEED_PHEV and ret.flags & HyundaiFlags.USE_FCA:
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.BLOCK_FCA.value
+
     # Car specific configuration overrides
 
     if candidate == CAR.KIA_OPTIMA_G4_FL:
