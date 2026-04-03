@@ -144,6 +144,10 @@ class CarInterface(CarInterfaceBase):
     elif ret.flags & HyundaiFlags.FCEV:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.FCEV_GAS.value
 
+    # Block camera FCA11 relay (see hyundai_legacy_fwd_hook); OP sends clean FCA11 on bus 0.
+    if candidate == CAR.KIA_CEED_PHEV and ret.flags & HyundaiFlags.USE_FCA:
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.BLOCK_FCA.value
+
     # Car specific configuration overrides
 
     if candidate == CAR.KIA_OPTIMA_G4_FL:

@@ -56,6 +56,11 @@ static const CanMsg HYUNDAI_TX_MSGS[] = {
   HYUNDAI_COMMON_TX_MSGS(0)
 };
 
+static const CanMsg HYUNDAI_TX_MSGS_FCA[] = {
+  HYUNDAI_COMMON_TX_MSGS(0)
+  {0x38D, 0, 8, .check_relay = false},  // FCA11 Bus 0 (OP sends; camera copy blocked via fwd hook)
+};
+
 static bool hyundai_legacy = false;
 
 static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
@@ -319,6 +324,16 @@ static safety_config hyundai_init(uint16_t param) {
   return ret;
 }
 
+// Block camera FCA11 (0x38D) from bus 2->0. Using check_relay on FCA11 can trip relay_malfunction
+// if FCA11 appears on bus 0 from any source, which breaks fingerprinting ("Car Unrecognized").
+static bool hyundai_legacy_fwd_hook(int bus_num, int addr) {
+  bool block_msg = false;
+  if (hyundai_block_fca && (bus_num == 2) && (addr == 0x38D)) {
+    block_msg = true;
+  }
+  return block_msg;
+}
+
 static safety_config hyundai_legacy_init(uint16_t param) {
   // older hyundai models have less checks due to missing counters and checksums
   static RxCheck hyundai_legacy_rx_checks[] = {
@@ -330,6 +345,9 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   hyundai_legacy = true;
   hyundai_longitudinal = false;
   hyundai_camera_scc = false;
+  if (hyundai_block_fca) {
+    return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS_FCA);
+  }
   return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
 }
 
@@ -346,6 +364,7 @@ const safety_hooks hyundai_legacy_hooks = {
   .init = hyundai_legacy_init,
   .rx = hyundai_rx_hook,
   .tx = hyundai_tx_hook,
+  .fwd = hyundai_legacy_fwd_hook,
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
   .compute_checksum = hyundai_compute_checksum,

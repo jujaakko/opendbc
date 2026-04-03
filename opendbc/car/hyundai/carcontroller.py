@@ -126,6 +126,11 @@ class CarController(CarControllerBase):
                                               hud_control.leftLaneVisible, hud_control.rightLaneVisible,
                                               left_lane_warning, right_lane_warning))
 
+    # 50 Hz: replace camera FCA11 (blocked from bus 2->0 in panda when BLOCK_FCA set)
+    if self.CP.carFingerprint == CAR.KIA_CEED_PHEV and self.CP.flags & HyundaiFlags.USE_FCA.value and hasattr(CS, "fca11"):
+      if self.frame % 2 == 0:
+        can_sends.append(hyundaican.create_fca11(self.packer, CS.fca11, int(self.frame / 2)))
+
     # Button messages
     if not self.CP.openpilotLongitudinalControl:
       if CC.cruiseControl.cancel:
