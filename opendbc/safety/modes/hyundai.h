@@ -56,11 +56,6 @@ static const CanMsg HYUNDAI_TX_MSGS[] = {
   HYUNDAI_COMMON_TX_MSGS(0)
 };
 
-static const CanMsg HYUNDAI_TX_MSGS_FCA[] = {
-  HYUNDAI_COMMON_TX_MSGS(0)
-  {0x38D, 0, 8, .check_relay = true},  // FCA11 Bus 0 (block camera FCA11, OP sends clean copy)
-};
-
 static bool hyundai_legacy = false;
 
 static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
@@ -335,9 +330,6 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   hyundai_legacy = true;
   hyundai_longitudinal = false;
   hyundai_camera_scc = false;
-  if (hyundai_block_fca) {
-    return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS_FCA);
-  }
   return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
 }
 

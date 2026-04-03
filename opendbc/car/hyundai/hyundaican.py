@@ -118,30 +118,6 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
   return packer.make_can_msg("LKAS11", 0, values)
 
 
-def create_fca11(packer, fca11, frame):
-  """Forward camera FCA11 with FCA_Failinfo cleared to prevent cluster warning."""
-  values = {s: fca11[s] for s in [
-    "CF_VSM_Prefill",
-    "CF_VSM_HBACmd",
-    "CF_VSM_Warn",
-    "CF_VSM_BeltCmd",
-    "CR_VSM_DecCmd",
-    "FCA_Status",
-    "FCA_CmdAct",
-    "FCA_StopReq",
-    "FCA_DrvSetStatus",
-    "CF_VSM_DecCmdAct",
-    "FCA_RelativeVelocity",
-    "FCA_TimetoCollision",
-    "PAINT1_Status",
-  ]}
-  values["FCA_Failinfo"] = 0
-  values["CR_FCA_Alive"] = frame % 0xF
-  fca11_dat = packer.make_can_msg("FCA11", 0, values)[1]
-  values["CR_FCA_ChkSum"] = hyundai_checksum(fca11_dat[:7])
-  return packer.make_can_msg("FCA11", 0, values)
-
-
 def create_clu11(packer, frame, clu11, button, CP):
   values = {s: clu11[s] for s in [
     "CF_Clu_CruiseSwState",

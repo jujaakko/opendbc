@@ -146,10 +146,6 @@ class CarController(CarControllerBase):
                                                       hud_control, set_speed_in_units, stopping,
                                                       CC.cruiseControl.override, use_fca, self.CP))
 
-    # 50 Hz FCA11 override: forward camera FCA11 with Failinfo cleared
-    if self.CP.carFingerprint == CAR.KIA_CEED_PHEV and self.CP.flags & HyundaiFlags.USE_FCA.value and hasattr(CS, 'fca11'):
-      can_sends.append(hyundaican.create_fca11(self.packer, CS.fca11, int(self.frame / 2)))
-
     # 20 Hz LFA MFA message
     if self.frame % 5 == 0 and self.CP.flags & HyundaiFlags.SEND_LFA.value:
       can_sends.append(hyundaican.create_lfahda_mfc(self.packer, CC.enabled))
