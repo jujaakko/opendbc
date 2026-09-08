@@ -30,17 +30,17 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
     values["CF_Lkas_ActToi"] = steer_req
     values["CF_Lkas_ToiFlt"] = torque_fault
     values["CF_Lkas_MsgCount"] = frame % 0x10
-    if steer_req:
-      # When OP steers, the camera detects the override and enters a fault state
-      # (sysSt=15, warn=15, FcwOpt_USM=4, LdwsOpt_USM=7, FusionState=1).
-      # Passing those through triggers "Check FCA" and "Check LKA" on the cluster.
-      # Override display/status signals with the camera's idle baseline values.
-      # FcwBasReq and FcwCollisionWarning are passed through from camera so the
-      # camera can still request emergency braking via ABS/ESC if needed.
+    # Camera faults when its LKAS11 is replaced (stock LKA/LDW nudge or OP steer):
+    # sysSt=15, warn=15, FcwOpt_USM=4, LdwsOpt_USM=7, FusionState=1.
+    # Passing those through triggers Check FCA / Check LDW on the cluster.
+    # Clamp fault encodings always. Keep LdwsLH/RHWarning and FCW request bits
+    # so stock LDW/FCW can still display.
+    cam_fault = (int(values.get("CF_Lkas_LdwsSysState", 0)) == 15 or
+                 int(values.get("CF_Lkas_SysWarning", 0)) == 15 or
+                 int(values.get("CF_Lkas_LdwsOpt_USM", 0)) == 7)
+    if steer_req or cam_fault:
       values["CF_Lkas_LdwsSysState"] = 0
       values["CF_Lkas_SysWarning"] = 0
-      values["CF_Lkas_LdwsLHWarning"] = 0
-      values["CF_Lkas_LdwsRHWarning"] = 0
       values["CF_Lkas_LdwsActivemode"] = 0
       values["CF_Lkas_FcwSysState"] = 0
       values["CF_Lkas_FusionState"] = 0
@@ -116,6 +116,19 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
   values["CF_Lkas_Chksum"] = checksum
 
   return packer.make_can_msg("LKAS11", 0, values)
+
+
+def create_fca11(packer, fca11):
+  """Forward camera FCA11 with FCA_Failinfo cleared so the cluster does not show Check FCA."""
+  values = {s: fca11[s] for s in [
+    "CF_VSM_Prefill", "CF_VSM_HBACmd", "CF_VSM_Warn", "CF_VSM_BeltCmd", "CR_VSM_DecCmd",
+    "FCA_Status", "FCA_CmdAct", "FCA_StopReq", "FCA_DrvSetStatus", "CF_VSM_DecCmdAct",
+    "FCA_RelativeVelocity", "FCA_TimetoCollision", "PAINT1_Status", "CR_FCA_Alive",
+  ]}
+  values["FCA_Failinfo"] = 0
+  fca11_dat = packer.make_can_msg("FCA11", 0, values)[1]
+  values["CR_FCA_ChkSum"] = hyundai_checksum(fca11_dat[:7])
+  return packer.make_can_msg("FCA11", 0, values)
 
 
 def create_clu11(packer, frame, clu11, button, CP):
