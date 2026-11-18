@@ -319,7 +319,20 @@ static safety_config hyundai_init(uint16_t param) {
   return ret;
 }
 
+static bool hyundai_legacy_fwd_hook(int bus_num, int addr) {
+  bool block_msg = false;
+  if (hyundai_spoof_mdps && (bus_num == 0) && (addr == 0x251)) {
+    block_msg = true;
+  }
+  return block_msg;
+}
+
 static safety_config hyundai_legacy_init(uint16_t param) {
+  static const CanMsg HYUNDAI_TX_MSGS_SPOOF_MDPS[] = {
+    HYUNDAI_COMMON_TX_MSGS(0)
+    {0x251, 2, 8, .check_relay = false},  // MDPS12 Bus 2 (spoofed for camera; bus 0->2 blocked via fwd hook)
+  };
+
   // older hyundai models have less checks due to missing counters and checksums
   static RxCheck hyundai_legacy_rx_checks[] = {
     HYUNDAI_COMMON_RX_CHECKS(true)
@@ -330,7 +343,11 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   hyundai_legacy = true;
   hyundai_longitudinal = false;
   hyundai_camera_scc = false;
-  return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
+  safety_config ret = BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
+  if (hyundai_spoof_mdps) {
+    SET_TX_MSGS(HYUNDAI_TX_MSGS_SPOOF_MDPS, ret);
+  }
+  return ret;
 }
 
 const safety_hooks hyundai_hooks = {
@@ -346,6 +363,7 @@ const safety_hooks hyundai_legacy_hooks = {
   .init = hyundai_legacy_init,
   .rx = hyundai_rx_hook,
   .tx = hyundai_tx_hook,
+  .fwd = hyundai_legacy_fwd_hook,
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
   .compute_checksum = hyundai_compute_checksum,

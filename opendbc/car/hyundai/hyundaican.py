@@ -30,17 +30,15 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
     values["CF_Lkas_ActToi"] = steer_req
     values["CF_Lkas_ToiFlt"] = torque_fault
     values["CF_Lkas_MsgCount"] = frame % 0x10
-    if steer_req:
-      # When OP steers, the camera detects the override and enters a fault state
-      # (sysSt=15, warn=15, FcwOpt_USM=4, LdwsOpt_USM=7, FusionState=1).
-      # Passing those through triggers "Check FCA" and "Check LKA" on the cluster.
-      # Override display/status signals with the camera's idle baseline values.
-      # FcwBasReq and FcwCollisionWarning are passed through from camera so the
-      # camera can still request emergency braking via ABS/ESC if needed.
+    # Camera faults when its LKAS11 is replaced (stock LKA/LDW nudge or OP steer):
+    # sysSt=15, warn=15, FcwOpt_USM=4, LdwsOpt_USM=7, FusionState=1.
+    # Clamp fault encodings always while keeping LdwsLH/RHWarning and FCW request bits.
+    cam_fault = (int(values.get("CF_Lkas_LdwsSysState", 0)) == 15 or
+                 int(values.get("CF_Lkas_SysWarning", 0)) == 15 or
+                 int(values.get("CF_Lkas_LdwsOpt_USM", 0)) == 7)
+    if steer_req or cam_fault:
       values["CF_Lkas_LdwsSysState"] = 0
       values["CF_Lkas_SysWarning"] = 0
-      values["CF_Lkas_LdwsLHWarning"] = 0
-      values["CF_Lkas_LdwsRHWarning"] = 0
       values["CF_Lkas_LdwsActivemode"] = 0
       values["CF_Lkas_FcwSysState"] = 0
       values["CF_Lkas_FusionState"] = 0
@@ -116,6 +114,25 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
   values["CF_Lkas_Chksum"] = checksum
 
   return packer.make_can_msg("LKAS11", 0, values)
+
+
+def create_mdps12(packer, mdps12, cnt, toi_active):
+  values = {s: mdps12[s] for s in [
+    "CR_Mdps_StrColTq",
+    "CF_Mdps_Def",
+    "CF_Mdps_ToiUnavail",
+    "CF_Mdps_ToiFlt",
+    "CF_Mdps_FailStat",
+    "CF_Mdps_SErr",
+    "CR_Mdps_StrTq",
+    "CR_Mdps_OutTq",
+  ]}
+  values["CF_Mdps_ToiActive"] = toi_active
+  values["CF_Mdps_MsgCount2"] = cnt % 256
+  values["CF_Mdps_Chksum2"] = 0
+  dat = packer.make_can_msg("MDPS12", 2, values)[1]
+  values["CF_Mdps_Chksum2"] = (sum(dat[:3]) + sum(dat[4:])) % 256
+  return packer.make_can_msg("MDPS12", 2, values)
 
 
 def create_clu11(packer, frame, clu11, button, CP):

@@ -246,3 +246,53 @@ class TestHyundaiFingerprint(unittest.TestCase):
         platforms_with_shared_codes.add(platform)
 
     assert platforms_with_shared_codes == excluded_platforms
+
+
+class TestCeedPhevWorkarounds(unittest.TestCase):
+  def test_spoof_mdps_flag(self):
+    CP = CarInterface.get_params(CAR.KIA_CEED_PHEV, gen_empty_fingerprint(), [], False, False, False)
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.SPOOF_MDPS
+
+  def test_create_mdps12_checksum_and_toi(self):
+    from opendbc.can import CANPacker, CANParser
+    from opendbc.car.hyundai.hyundaican import create_mdps12
+
+    packer = CANPacker("hyundai_kia_generic")
+    mdps12 = {
+      "CR_Mdps_StrColTq": 42.0, "CF_Mdps_Def": 0.0, "CF_Mdps_ToiUnavail": 0.0,
+      "CF_Mdps_ToiFlt": 0.0, "CF_Mdps_FailStat": 0.0, "CF_Mdps_SErr": 0.0,
+      "CR_Mdps_StrTq": 0.35, "CR_Mdps_OutTq": 0.6,
+    }
+    addr, dat, bus = create_mdps12(packer, mdps12, cnt=205, toi_active=0)
+    assert addr == 0x251 and bus == 2
+    assert dat[3] == (sum(dat[:3]) + sum(dat[4:])) % 256
+
+    parser = CANParser("hyundai_kia_generic", [("MDPS12", 100)], 2)
+    parser.update([(0, [(addr, dat, bus)])])
+    assert parser.vl["MDPS12"]["CF_Mdps_ToiActive"] == 0.0
+    assert parser.vl["MDPS12"]["CF_Mdps_MsgCount2"] == 205.0
+    assert parser.vl["MDPS12"]["CR_Mdps_StrColTq"] == 42.0
+
+  def test_create_lkas11_clamps_disengaged_cam_fault(self):
+    from opendbc.can import CANPacker, CANParser
+    from opendbc.car.hyundai.hyundaican import create_lkas11
+
+    CP = CarInterface.get_params(CAR.KIA_CEED_PHEV, gen_empty_fingerprint(), [], False, False, False)
+    packer = CANPacker("hyundai_kia_generic")
+    lkas11 = {
+      "CF_Lkas_LdwsActivemode": 3, "CF_Lkas_LdwsSysState": 15, "CF_Lkas_SysWarning": 15,
+      "CF_Lkas_LdwsLHWarning": 1, "CF_Lkas_LdwsRHWarning": 0, "CF_Lkas_HbaLamp": 0,
+      "CF_Lkas_FcwBasReq": 0, "CF_Lkas_HbaSysState": 1, "CF_Lkas_FcwOpt": 0,
+      "CF_Lkas_HbaOpt": 1, "CF_Lkas_FcwSysState": 0, "CF_Lkas_FcwCollisionWarning": 0,
+      "CF_Lkas_FusionState": 1, "CF_Lkas_FcwOpt_USM": 4, "CF_Lkas_LdwsOpt_USM": 7,
+    }
+    addr, dat, bus = create_lkas11(packer, 3, CP, 0, False, False, lkas11, False, 0, False, True, True, False, False)
+    parser = CANParser("hyundai_kia_generic", [("LKAS11", 100)], 0)
+    parser.update([(0, [(addr, dat, bus)])])
+    vl = parser.vl["LKAS11"]
+    assert vl["CF_Lkas_LdwsSysState"] == 0.0
+    assert vl["CF_Lkas_SysWarning"] == 0.0
+    assert vl["CF_Lkas_FusionState"] == 0.0
+    assert vl["CF_Lkas_LdwsOpt_USM"] == 2.0
+    assert vl["CF_Lkas_FcwOpt_USM"] == 1.0
+    assert vl["CF_Lkas_LdwsLHWarning"] == 1.0

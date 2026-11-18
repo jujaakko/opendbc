@@ -144,6 +144,10 @@ class CarInterface(CarInterfaceBase):
     elif ret.flags & HyundaiFlags.FCEV:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.FCEV_GAS.value
 
+    # Spoof MDPS12 (0x251) on bus 2 so camera does not see ToiActive mismatch and fault FCA/LDW
+    if candidate == CAR.KIA_CEED_PHEV:
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.SPOOF_MDPS.value
+
     # Car specific configuration overrides
 
     if candidate == CAR.KIA_OPTIMA_G4_FL:

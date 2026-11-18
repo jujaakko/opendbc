@@ -191,6 +191,27 @@ class TestHyundaiLegacySafetyHEV(TestHyundaiSafety):
     return self.packer.make_can_msg_safety("E_EMS11", 0, values, fix_checksum=checksum)
 
 
+class TestHyundaiLegacySafetySpoofMdps(TestHyundaiLegacySafety):
+  TX_MSGS = [[0x340, 0], [0x4F1, 0], [0x485, 0], [0x251, 2]]
+  FWD_BLACKLISTED_ADDRS = {0: [0x251], 2: [0x340, 0x485]}
+  RELAY_MALFUNCTION_ADDRS = {0: (0x340, 0x485)}
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_kia_generic")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiLegacy, HyundaiSafetyFlags.SPOOF_MDPS)
+    self.safety.init_tests()
+
+  def test_block_mdps12_fwd(self):
+    self.assertEqual(-1, self.safety.safety_fwd_hook(0, 0x251))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x251))
+
+  def test_mdps12_tx_bus_restriction(self):
+    # MDPS12 is only allowed on bus 2 (camera), never on bus 0 (car)
+    self.assertTrue(self._tx(self.packer.make_can_msg_safety("MDPS12", 2, {})))
+    self.assertFalse(self._tx(self.packer.make_can_msg_safety("MDPS12", 0, {})))
+
+
 class TestHyundaiLongitudinalSafety(HyundaiLongitudinalBase, TestHyundaiSafety):
   TX_MSGS = [[0x340, 0], [0x4F1, 0], [0x485, 0], [0x420, 0], [0x421, 0], [0x50A, 0], [0x389, 0], [0x4A2, 0], [0x38D, 0], [0x483, 0], [0x7D0, 0]]
 

@@ -54,6 +54,7 @@ class CarController(CarControllerBase):
     self.apply_torque_last = 0
     self.car_fingerprint = CP.carFingerprint
     self.last_button_frame = 0
+    self.mdps_cnt: int | None = None
 
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
@@ -125,6 +126,15 @@ class CarController(CarControllerBase):
                                               torque_fault, CS.lkas11, sys_warning, sys_state, CC.enabled,
                                               hud_control.leftLaneVisible, hud_control.rightLaneVisible,
                                               left_lane_warning, right_lane_warning))
+
+    # 100 Hz: forward MDPS12 to bus 2 (camera) with ToiActive matching camera's ActToi
+    if self.CP.carFingerprint == CAR.KIA_CEED_PHEV and getattr(CS, "mdps12", None):
+      if self.mdps_cnt is None:
+        self.mdps_cnt = int(CS.mdps12["CF_Mdps_MsgCount2"])
+      else:
+        self.mdps_cnt = (self.mdps_cnt + 1) % 256
+      toi_active = 0 if apply_steer_req else int(CS.lkas11["CF_Lkas_ActToi"])
+      can_sends.append(hyundaican.create_mdps12(self.packer, CS.mdps12, self.mdps_cnt, toi_active))
 
     # Button messages
     if not self.CP.openpilotLongitudinalControl:
