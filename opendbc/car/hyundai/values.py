@@ -543,7 +543,7 @@ class CAR(Platforms):
   KIA_CEED_PHEV = HyundaiPlatformConfig(
     [HyundaiCarDocs("Kia Ceed Plug-in Hybrid 2021", car_parts=CarParts.common([CarHarness.hyundai_b]))],
     CarSpecs(wheelbase=2.65, steerRatio=13.75, tireStiffnessFactor=0.5),
-    flags=HyundaiFlags.LEGACY | HyundaiFlags.HYBRID,
+    flags=HyundaiFlags.HYBRID,
   )
   KIA_EV6 = HyundaiCanFDPlatformConfig(
     [

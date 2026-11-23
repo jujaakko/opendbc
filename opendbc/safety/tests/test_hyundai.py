@@ -170,7 +170,7 @@ class TestHyundaiLegacySafetyHEV(TestHyundaiSafety):
     return self.packer.make_can_msg_safety("E_EMS11", 0, values, fix_checksum=checksum)
 
 
-class TestHyundaiLegacySafetySpoofMdps(TestHyundaiLegacySafety):
+class TestHyundaiSafetySpoofMdps(TestHyundaiSafety):
   SAFETY_PARAM = HyundaiSafetyFlags.SPOOF_MDPS
   TX_MSGS = [[0x340, 0], [0x4F1, 0], [0x485, 0], [0x251, 2]]
   FWD_BLACKLISTED_ADDRS = {0: [0x251], 2: [0x340, 0x485]}
@@ -281,6 +281,24 @@ class TestHyundaiLongitudinalSafetyCameraSCC(HyundaiLongitudinalBase, TestHyunda
 
 class TestHyundaiSafetyFCEVLong(TestHyundaiLongitudinalSafety, TestHyundaiSafetyFCEV):
   SAFETY_PARAM = HyundaiSafetyFlags.FCEV_GAS | HyundaiSafetyFlags.LONG
+
+
+class TestHyundaiLongitudinalSafetySpoofMdps(TestHyundaiLongitudinalSafety):
+  SAFETY_PARAM = HyundaiSafetyFlags.LONG | HyundaiSafetyFlags.HYBRID_GAS | HyundaiSafetyFlags.SPOOF_MDPS
+  TX_MSGS = TestHyundaiLongitudinalSafety.TX_MSGS + [[0x251, 2]]
+  FWD_BLACKLISTED_ADDRS = {0: [0x251], 2: [0x340, 0x485, 0x421, 0x420, 0x50A, 0x389]}
+
+  def _user_gas_msg(self, gas):
+    values = {"CR_Vcu_AccPedDep_Pos": gas}
+    return self.packer.make_can_msg_safety("E_EMS11", 0, values, fix_checksum=checksum)
+
+  def test_block_mdps12_fwd(self):
+    self.assertEqual(-1, self.safety.safety_fwd_hook(0, 0x251))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x251))
+
+  def test_mdps12_tx_bus_restriction(self):
+    self.assertTrue(self._tx(self.packer.make_can_msg_safety("MDPS12", 2, {})))
+    self.assertFalse(self._tx(self.packer.make_can_msg_safety("MDPS12", 0, {})))
 
 
 if __name__ == "__main__":

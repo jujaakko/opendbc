@@ -252,11 +252,24 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config hyundai_init(uint16_t param) {
+  static const CanMsg HYUNDAI_TX_MSGS_SPOOF_MDPS[] = {
+    HYUNDAI_COMMON_TX_MSGS(0)
+    {0x251, 2, 8, .check_relay = false},  // MDPS12 Bus 2 (spoofed for camera; bus 0->2 blocked via fwd hook)
+  };
+
   static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
     HYUNDAI_LONG_COMMON_TX_MSGS(0)
     {0x38D, 0, 8, .check_relay = false},  // FCA11 Bus 0
     {0x483, 0, 8, .check_relay = false},  // FCA12 Bus 0
     {0x7D0, 0, 8, .check_relay = false},  // radar UDS TX addr Bus 0 (for radar disable)
+  };
+
+  static const CanMsg HYUNDAI_LONG_TX_MSGS_SPOOF_MDPS[] = {
+    HYUNDAI_LONG_COMMON_TX_MSGS(0)
+    {0x38D, 0, 8, .check_relay = false},  // FCA11 Bus 0
+    {0x483, 0, 8, .check_relay = false},  // FCA12 Bus 0
+    {0x7D0, 0, 8, .check_relay = false},  // radar UDS TX addr Bus 0 (for radar disable)
+    {0x251, 2, 8, .check_relay = false},  // MDPS12 Bus 2 (spoofed for camera; bus 0->2 blocked via fwd hook)
   };
 
   static const CanMsg HYUNDAI_CAMERA_SCC_TX_MSGS[] = {
@@ -291,6 +304,8 @@ static safety_config hyundai_init(uint16_t param) {
     }
     if (safety_setup.hyundai_camera_scc) {
       SET_TX_MSGS(HYUNDAI_CAMERA_SCC_LONG_TX_MSGS, ret);
+    } else if (safety_setup.hyundai_spoof_mdps) {
+      SET_TX_MSGS(HYUNDAI_LONG_TX_MSGS_SPOOF_MDPS, ret);
     } else {
       SET_TX_MSGS(HYUNDAI_LONG_TX_MSGS, ret);
     }
@@ -316,7 +331,11 @@ static safety_config hyundai_init(uint16_t param) {
       HYUNDAI_FCEV_GAS_ADDR_CHECK
     };
 
-    SET_TX_MSGS(HYUNDAI_TX_MSGS, ret);
+    if (safety_setup.hyundai_spoof_mdps) {
+      SET_TX_MSGS(HYUNDAI_TX_MSGS_SPOOF_MDPS, ret);
+    } else {
+      SET_TX_MSGS(HYUNDAI_TX_MSGS, ret);
+    }
     if (safety_setup.hyundai_fcev_gas_signal) {
       SET_RX_CHECKS(hyundai_fcev_rx_checks, ret);
     } else {
@@ -326,7 +345,7 @@ static safety_config hyundai_init(uint16_t param) {
   return ret;
 }
 
-static bool hyundai_legacy_fwd_hook(int bus_num, int addr) {
+static bool hyundai_fwd_hook(int bus_num, int addr) {
   bool block_msg = false;
   if (safety_setup.hyundai_spoof_mdps && (bus_num == 0) && (addr == 0x251)) {
     block_msg = true;
@@ -335,11 +354,6 @@ static bool hyundai_legacy_fwd_hook(int bus_num, int addr) {
 }
 
 static safety_config hyundai_legacy_init(uint16_t param) {
-  static const CanMsg HYUNDAI_TX_MSGS_SPOOF_MDPS[] = {
-    HYUNDAI_COMMON_TX_MSGS(0)
-    {0x251, 2, 8, .check_relay = false},  // MDPS12 Bus 2 (spoofed for camera; bus 0->2 blocked via fwd hook)
-  };
-
   // older hyundai models have less checks due to missing counters and checksums
   static const RxCheck hyundai_legacy_rx_checks[] = {
     HYUNDAI_COMMON_RX_CHECKS
@@ -351,17 +365,14 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   safety_setup.hyundai_legacy = true;
   safety_setup.hyundai_longitudinal = false;
   safety_setup.hyundai_camera_scc = false;
-  safety_config ret = BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
-  if (safety_setup.hyundai_spoof_mdps) {
-    SET_TX_MSGS(HYUNDAI_TX_MSGS_SPOOF_MDPS, ret);
-  }
-  return ret;
+  return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
 }
 
 static const safety_hooks hyundai_hooks = {
   .init = hyundai_init,
   .rx = hyundai_rx_hook,
   .tx = hyundai_tx_hook,
+  .fwd = hyundai_fwd_hook,
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
   .compute_checksum = hyundai_compute_checksum,
@@ -371,7 +382,6 @@ static const safety_hooks hyundai_legacy_hooks = {
   .init = hyundai_legacy_init,
   .rx = hyundai_rx_hook,
   .tx = hyundai_tx_hook,
-  .fwd = hyundai_legacy_fwd_hook,
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
   .compute_checksum = hyundai_compute_checksum,

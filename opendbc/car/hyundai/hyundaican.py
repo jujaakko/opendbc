@@ -212,16 +212,27 @@ def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, se
   # Only send FCA11 on cars where it exists on the bus
   # On Camera SCC cars, FCA11 is not disabled, so we forward stock FCA11 back to the car forward hooks
   if use_fca and not (CP.flags & HyundaiFlags.CAMERA_SCC):
-    # note that some vehicles most likely have an alternate checksum/counter definition
-    # https://github.com/commaai/opendbc/commit/9ddcdb22c4929baf310295e832668e6e7fcfa602
-    fca11_values = {
-      "CR_FCA_Alive": idx % 0xF,
-      "PAINT1_Status": 1,
-      "FCA_DrvSetStatus": 1,
-      "FCA_Status": 1,  # AEB disabled
-    }
-    fca11_dat = packer.make_can_msg("FCA11", 0, fca11_values)[1]
-    fca11_values["CR_FCA_ChkSum"] = hyundai_checksum(fca11_dat[:7])
+    if CP.carFingerprint == CAR.KIA_CEED_PHEV:
+      # Ceed PHEV uses a 4-bit rolling counter (0..14) and 4-bit nibble checksum in byte 7 (same as SCC12)
+      fca11_values = {
+        "FCA_Status": 1,  # AEB disabled
+      }
+      fca11_cnt = idx % 0xF
+      fca11_dat = bytearray(packer.make_can_msg("FCA11", 0, fca11_values)[1])
+      fca11_dat[7] = fca11_cnt
+      fca11_chksum = (0x10 - sum(sum(divmod(i, 16)) for i in fca11_dat) % 0x10) & 0xF
+      fca11_values["CR_FCA_ChkSum"] = (fca11_chksum << 4) | fca11_cnt
+    else:
+      # note that some vehicles most likely have an alternate checksum/counter definition
+      # https://github.com/commaai/opendbc/commit/9ddcdb22c4929baf310295e832668e6e7fcfa602
+      fca11_values = {
+        "CR_FCA_Alive": idx % 0xF,
+        "PAINT1_Status": 1,
+        "FCA_DrvSetStatus": 1,
+        "FCA_Status": 1,  # AEB disabled
+      }
+      fca11_dat = packer.make_can_msg("FCA11", 0, fca11_values)[1]
+      fca11_values["CR_FCA_ChkSum"] = hyundai_checksum(fca11_dat[:7])
     commands.append(packer.make_can_msg("FCA11", 0, fca11_values))
 
   return commands

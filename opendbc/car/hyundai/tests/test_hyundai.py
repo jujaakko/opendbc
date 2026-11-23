@@ -260,9 +260,39 @@ class TestHyundaiFingerprint(unittest.TestCase):
 
 
 class TestCeedPhevWorkarounds(unittest.TestCase):
-  def test_spoof_mdps_flag(self):
+  def test_spoof_mdps_and_alpha_long_flags(self):
     CP = CarInterface.get_params(CAR.KIA_CEED_PHEV, gen_empty_fingerprint(), [], False, False, False)
+    assert CP.alphaLongitudinalAvailable
+    assert not CP.openpilotLongitudinalControl
+    assert CP.safetyConfigs[-1].safetyModel == CarParams.SafetyModel.hyundai
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.HYBRID_GAS
     assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.SPOOF_MDPS
+    assert not (CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
+
+    CP_long = CarInterface.get_params(CAR.KIA_CEED_PHEV, gen_empty_fingerprint(), [], True, False, False)
+    assert CP_long.openpilotLongitudinalControl
+    assert CP_long.safetyConfigs[-1].safetyModel == CarParams.SafetyModel.hyundai
+    assert CP_long.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG
+    assert CP_long.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.HYBRID_GAS
+    assert CP_long.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.SPOOF_MDPS
+
+  def test_create_fca11_nibble_checksum(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import structs
+    from opendbc.car.hyundai.hyundaican import create_acc_commands
+
+    CP = CarInterface.get_params(CAR.KIA_CEED_PHEV, gen_empty_fingerprint(), [], True, False, False)
+    packer = CANPacker("hyundai_can_generated")
+    hud = structs.CarControl.HUDControl.new_message()
+    for idx in range(15):
+      cmds = create_acc_commands(packer, False, 0.0, 1.0, idx, hud, 0.0, False, False, True, CP)
+      fca11 = [c for c in cmds if c[0] == 0x38D][0]
+      dat = fca11[1]
+      assert fca11[2] == 0
+      assert dat[2] == 0x04  # FCA_Status = 1 (AEB disabled)
+      assert (dat[7] & 0xF) == idx
+      nibble_sum = sum(sum(divmod(b, 16)) for b in dat[:7]) + (dat[7] & 0xF)
+      assert (dat[7] >> 4) == ((0x10 - nibble_sum % 0x10) & 0xF)
 
   def test_create_mdps12_checksum_and_toi(self):
     from opendbc.can import CANPacker, CANParser
