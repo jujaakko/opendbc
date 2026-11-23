@@ -144,7 +144,7 @@ class CarController(CarControllerBase):
         self.mdps_cnt = int(CS.mdps12["CF_Mdps_MsgCount2"])
       else:
         self.mdps_cnt = (self.mdps_cnt + 1) % 256
-      toi_active = 0 if apply_steer_req else int(CS.lkas11["CF_Lkas_ActToi"])
+      toi_active = int(CS.lkas11["CF_Lkas_ActToi"])
       can_sends.append(hyundaican.create_mdps12(self.packer, CS.mdps12, self.mdps_cnt, toi_active))
 
     # Button messages
