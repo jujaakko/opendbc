@@ -27,7 +27,10 @@ echo "Cppcheck checkers list from test_misra.sh:" > $CHECKLIST
 
 cppcheck() {
   # get all gcc defines: arm-none-eabi-gcc -dM -E - < /dev/null
-  COMMON_DEFINES="-D__GNUC__=9"
+  # cppcheck does not provide __has_include_next, which is used by Clang's stdint.h
+  # cppcheck does not provide Clang's feature/module builtins used by stddef.h
+  # (including Apple Clang's resource headers).
+  COMMON_DEFINES="-D__GNUC__=9 -D__has_include_next(x)=0 -D__has_feature(x)=0 -D__building_module(x)=0 -D__has_extension(x)=0 -D__has_builtin(x)=0 -D__has_attribute(x)=0"
 
   # note that cppcheck build cache results in inconsistent results as of v2.13.0
   OUTPUT=$(mktemp)
@@ -37,7 +40,9 @@ cppcheck() {
 
   OPENDBC_ROOT=${OPENDBC_ROOT:-$BASEDIR}
   $CPPCHECK_DIR/cppcheck --inline-suppr -I $OPENDBC_ROOT \
+          -I "$(cc -print-file-name=include)" \
           --suppress=missingIncludeSystem \
+          --suppress=*:*include/* \
           --suppressions-list=$DIR/suppressions.txt  \
            --error-exitcode=2 --check-level=exhaustive --safety \
           --platform=arm32-wchar_t4 $COMMON_DEFINES --checkers-report=$CHECKLIST.tmp \

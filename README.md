@@ -57,9 +57,9 @@ cd opendbc
 ./test.sh
 
 # here are the individual commands it runs
-pip3 install -e .[testing,docs]  # install dependencies
+pip3 install -e .[testing]  # install dependencies
 scons -j8                        # build with 8 cores
-pytest .                         # run the tests
+unittest-parallel                # run the tests
 lefthook run lint                # run the linter
 ```
 
@@ -108,6 +108,10 @@ Start off by recording a route with lots of interesting events: enable LKAS and 
 #### Longitudinal
 
 Use the [longitudinal maneuvers](https://github.com/commaai/openpilot/tree/master/tools/longitudinal_maneuvers) report to evaluate your car's longitudinal control and tune it.
+
+### Validation
+
+Before submitting a port, go through the [car porting checklist](docs/CAR_PORTING_CHECKLIST.md).
 
 ## Contributing
 
@@ -160,7 +164,7 @@ Every car port is eligible for a bounty:
 * $250 - [Any car model port](https://github.com/orgs/commaai/projects/26/views/1?pane=issue&itemId=47913790)
 * $300 - [Reverse Engineering a new Actuation Message](https://github.com/orgs/commaai/projects/26/views/1?pane=issue&itemId=73445563)
 
-In addition to the standard bounties, we also offer higher value bounties for more popular cars. See those at [comma.ai/bounties](comma.ai/bounties).
+In addition to the standard bounties, we also offer higher value bounties for more popular cars. See those at [comma.ai/bounties](https://comma.ai/bounties).
 
 ## FAQ
 
@@ -168,7 +172,7 @@ In addition to the standard bounties, we also offer higher value bounties for mo
 
 ***Which cars are supported?*** See the [supported cars list](docs/CARS.md).
 
-***Can I add support for my car?*** Yes, most car support comes from the community. Read the guide [here](https://github.com/commaai/opendbc/blob/docs/README.md#how-to-port-a-car).
+***Can I add support for my car?*** Yes, most car support comes from the community. Read the guide [here](https://github.com/commaai/opendbc/blob/master/README.md#how-to-port-a-car).
 
 ***Which cars can be supported?*** Any car with LKAS and ACC. More info [here](https://github.com/commaai/openpilot/blob/master/docs/CARS.md#dont-see-your-car-here).
 

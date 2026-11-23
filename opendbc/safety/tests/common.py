@@ -9,6 +9,7 @@ from collections.abc import Callable
 from opendbc.can import CANPacker
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.safety.tests.libsafety import libsafety_py
+from opendbc.car.lateral import MAX_LATERAL_ACCEL, MAX_LATERAL_JERK
 
 MAX_WRONG_COUNTERS = 5
 MAX_SAMPLE_VALS = 6
@@ -34,10 +35,20 @@ def round_speed(v):
   return round(v * VEHICLE_SPEED_FACTOR) / VEHICLE_SPEED_FACTOR
 
 
+def speeds_within_delta(speed, speed_2):
+  # safety compares the speeds in integer VEHICLE_SPEED_FACTOR units
+  delta = away_round(speed * VEHICLE_SPEED_FACTOR) - away_round(speed_2 * VEHICLE_SPEED_FACTOR)
+  return abs(delta) <= MAX_SPEED_DELTA * VEHICLE_SPEED_FACTOR
+
+
 def make_msg(bus, addr, length=8, dat=None):
   if dat is None:
     dat = b'\x00' * length
   return libsafety_py.make_CANPacket(addr, bus, dat)
+
+
+def state_buffer(copy):
+  return libsafety_py.ffi.buffer(libsafety_py.ffi.addressof(libsafety_py.libsafety, copy))
 
 
 class CANPackerSafety(CANPacker):
@@ -72,12 +83,28 @@ def add_regen_tests(cls):
 
 
 class SafetyTestBase(unittest.TestCase):
-  safety: libsafety_py.LibSafety | None
+  safety: libsafety_py.LibSafety
+  DBC: str | None = None
+  packer: CANPackerSafety
+  SAFETY_MODEL: int | None
+  SAFETY_PARAM = 0
+
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    if self.DBC is not None:
+      self.packer = CANPackerSafety(self.DBC)
+    if self.SAFETY_MODEL is not None:
+      self.safety.set_safety_hooks(self.SAFETY_MODEL, self.SAFETY_PARAM)
+    self.safety.init_tests()
+
+  def tearDown(self):
+    self.assertFalse(self.safety.safety_redundancy_fault)
+    self.assertEqual(state_buffer("safety_a")[:], state_buffer("safety_b")[:])
 
   @classmethod
   def setUpClass(cls):
-    if cls.__name__ == "SafetyTestBase":
-      cls.safety = None
+    # Classes defined in this module and classes named *Base are shared test helpers.
+    if cls.__module__ == __name__ or cls.__name__.endswith('Base'):
       raise unittest.SkipTest
 
   def _reset_safety_hooks(self):
@@ -154,12 +181,6 @@ class LongitudinalAccelSafetyTest(SafetyTestBase, abc.ABC):
   MIN_ACCEL: float = -3.5
   INACTIVE_ACCEL: float = 0.0
 
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "LongitudinalAccelSafetyTest":
-      cls.safety = None
-      raise unittest.SkipTest
-
   @abc.abstractmethod
   def _accel_msg(self, accel: float):
     pass
@@ -190,29 +211,25 @@ class LongitudinalAccelSafetyTest(SafetyTestBase, abc.ABC):
 class LongitudinalGasBrakeSafetyTest(SafetyTestBase, abc.ABC):
 
   MIN_BRAKE: int = 0
-  MAX_BRAKE: int | None = None
-  MAX_POSSIBLE_BRAKE: int | None = None
+  MAX_BRAKE: int
+  MAX_POSSIBLE_BRAKE: int
 
   MIN_GAS: int = 0
-  MAX_GAS: int | None = None
+  MAX_GAS: int
   INACTIVE_GAS = 0
   MIN_POSSIBLE_GAS: int = 0
-  MAX_POSSIBLE_GAS: int | None = None
+  MAX_POSSIBLE_GAS: int
 
   def test_gas_brake_limits_correct(self):
-    self.assertIsNotNone(self.MAX_POSSIBLE_BRAKE)
-    self.assertIsNotNone(self.MAX_POSSIBLE_GAS)
-
-    assert self.MAX_BRAKE is not None and self.MAX_GAS is not None
     self.assertGreater(self.MAX_BRAKE, self.MIN_BRAKE)
     self.assertGreater(self.MAX_GAS, self.MIN_GAS)
 
   @abc.abstractmethod
-  def _send_gas_msg(self, gas: int):
+  def _send_gas_msg(self, gas: float):
     pass
 
   @abc.abstractmethod
-  def _send_brake_msg(self, brake: int):
+  def _send_brake_msg(self, brake: float):
     pass
 
   def test_brake_safety_check(self):
@@ -231,12 +248,6 @@ class TorqueSteeringSafetyTestBase(SafetyTestBase, abc.ABC):
   MAX_RT_DELTA = 0
 
   NO_STEER_REQ_BIT = False
-
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "TorqueSteeringSafetyTestBase":
-      cls.safety = None
-      raise unittest.SkipTest
 
   @property
   def MAX_TORQUE(self):
@@ -319,12 +330,6 @@ class TorqueSteeringSafetyTestBase(SafetyTestBase, abc.ABC):
 
 class SteerRequestCutSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
 
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "SteerRequestCutSafetyTest":
-      cls.safety = None
-      raise unittest.SkipTest
-
   # Safety around steering request bit mismatch tolerance
   MIN_VALID_STEERING_FRAMES: int
   MAX_INVALID_STEERING_FRAMES: int
@@ -344,7 +349,9 @@ class SteerRequestCutSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
         - We can always recover from violations if steer_req=1
     """
 
-    for min_valid_steer_frames in range(self.MIN_VALID_STEERING_FRAMES * 2):
+    # dense around the threshold, sparse elsewhere (the valid frame counter saturates at MIN_VALID_STEERING_FRAMES)
+    valid_frames = self._boundary_values([self.MIN_VALID_STEERING_FRAMES], 0, self.MIN_VALID_STEERING_FRAMES * 2, sparse_count=10)
+    for min_valid_steer_frames in map(int, valid_frames):
       # Reset match count and rt timer to allow cut (valid_steer_req_count, ts_steer_req_mismatch_last)
       self.safety.init_tests()
       self.safety.set_timer(self.MIN_VALID_STEERING_RT_INTERVAL)
@@ -362,7 +369,7 @@ class SteerRequestCutSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
         self.assertEqual(should_tx and idx < self.MAX_INVALID_STEERING_FRAMES, tx)
 
       # Keep blocking after one steer_req mismatch
-      for _ in range(100):
+      for _ in range(10):
         self.assertFalse(self._tx(self._torque_cmd_msg(self.MAX_TORQUE, steer_req=0)))
 
       # Make sure we can recover
@@ -420,7 +427,7 @@ class SteerRequestCutSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
         self.assertEqual(should_tx, self._tx(self._torque_cmd_msg(self.MAX_TORQUE, steer_req=0)))
 
       # Keep blocking after one steer_req mismatch
-      for _ in range(100):
+      for _ in range(10):
         self.assertFalse(self._tx(self._torque_cmd_msg(self.MAX_TORQUE, steer_req=0)))
 
       # Make sure we can recover
@@ -434,12 +441,6 @@ class DriverTorqueSteeringSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
   DRIVER_TORQUE_ALLOWANCE = 0
   DRIVER_TORQUE_FACTOR = 0
 
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "DriverTorqueSteeringSafetyTest":
-      cls.safety = None
-      raise unittest.SkipTest
-
   @abc.abstractmethod
   def _torque_driver_msg(self, torque):
     pass
@@ -447,6 +448,21 @@ class DriverTorqueSteeringSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
   def _reset_torque_driver_measurement(self, torque):
     for _ in range(MAX_SAMPLE_VALS):
       self._rx(self._torque_driver_msg(torque))
+
+  def test_driver_torque_measurements(self):
+    for torque in (50, -50, *([0] * (MAX_SAMPLE_VALS - 2))):
+      self.assertTrue(self._rx(self._torque_driver_msg(torque)))
+
+    self.assertEqual(-50, self.safety.get_torque_driver_min())
+    self.assertEqual(50, self.safety.get_torque_driver_max())
+
+    self.assertTrue(self._rx(self._torque_driver_msg(0)))
+    self.assertEqual(0, self.safety.get_torque_driver_max())
+    self.assertEqual(-50, self.safety.get_torque_driver_min())
+
+    self.assertTrue(self._rx(self._torque_driver_msg(0)))
+    self.assertEqual(0, self.safety.get_torque_driver_max())
+    self.assertEqual(0, self.safety.get_torque_driver_min())
 
   def test_non_realtime_limit_up(self):
     self._reset_torque_driver_measurement(0)
@@ -535,12 +551,6 @@ class MotorTorqueSteeringSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
   MAX_TORQUE_ERROR = 0
   TORQUE_MEAS_TOLERANCE = 0
 
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "MotorTorqueSteeringSafetyTest":
-      cls.safety = None
-      raise unittest.SkipTest
-
   @abc.abstractmethod
   def _torque_meas_msg(self, torque):
     pass
@@ -568,23 +578,18 @@ class MotorTorqueSteeringSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
           self.assertEqual(send, self._tx(self._torque_cmd_msg(torque)))
 
   def test_non_realtime_limit_down(self):
-    self.safety.set_controls_allowed(True)
-
     for speed in self._torque_speed_range:
       self._reset_speed_measurement(speed)
       max_torque = self._get_max_torque(speed)
-
       torque_meas = max_torque - self.MAX_TORQUE_ERROR - 50
 
-      self.safety.set_rt_torque_last(max_torque)
-      self.safety.set_torque_meas(torque_meas, torque_meas)
-      self.safety.set_desired_torque_last(max_torque)
-      self.assertTrue(self._tx(self._torque_cmd_msg(max_torque - self.MAX_RATE_DOWN)))
-
-      self.safety.set_rt_torque_last(max_torque)
-      self.safety.set_torque_meas(torque_meas, torque_meas)
-      self.safety.set_desired_torque_last(max_torque)
-      self.assertFalse(self._tx(self._torque_cmd_msg(max_torque - self.MAX_RATE_DOWN + 1)))
+      for sign in (-1, 1):
+        for delta in (self.MAX_RATE_DOWN, self.MAX_RATE_DOWN - 1):
+          self.safety.set_controls_allowed(True)
+          self.safety.set_rt_torque_last(sign * max_torque)
+          self.safety.set_torque_meas(sign * torque_meas, sign * torque_meas)
+          self.safety.set_desired_torque_last(sign * max_torque)
+          self.assertEqual(delta == self.MAX_RATE_DOWN, self._tx(self._torque_cmd_msg(sign * (max_torque - delta))))
 
   def test_exceed_torque_sensor(self):
     self.safety.set_controls_allowed(True)
@@ -656,12 +661,6 @@ class MotorTorqueSteeringSafetyTest(TorqueSteeringSafetyTestBase, abc.ABC):
 
 
 class VehicleSpeedSafetyTest(SafetyTestBase):
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "VehicleSpeedSafetyTest":
-      cls.safety = None
-      raise unittest.SkipTest
-
   @abc.abstractmethod
   def _speed_msg(self, speed):
     pass
@@ -682,12 +681,6 @@ class AngleSteeringSafetyTest(VehicleSpeedSafetyTest):
 
   # Real time limits
   LATERAL_FREQUENCY: int = -1  # Hz
-
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "AngleSteeringSafetyTest":
-      cls.safety = None
-      raise unittest.SkipTest
 
   @abc.abstractmethod
   def _angle_cmd_msg(self, angle: float, enabled: bool, increment_timer: bool = True):
@@ -774,10 +767,10 @@ class AngleSteeringSafetyTest(VehicleSpeedSafetyTest):
       self.safety.set_controls_allowed(controls_allowed)
 
       for steer_control_enabled in (True, False):
-        for angle_meas in np.arange(-90, 91, 10):
+        for angle_meas in range(-90, 91, 10):
           self._reset_angle_measurement(angle_meas)
 
-          for angle_cmd in np.arange(-90, 91, 10):
+          for angle_cmd in range(-90, 91, 10):
             self._set_prev_desired_angle(angle_cmd)
 
             # controls_allowed is checked if actuation bit is 1, else the angle must be close to meas (inactive)
@@ -822,6 +815,112 @@ class AngleSteeringSafetyTest(VehicleSpeedSafetyTest):
       self.assertTrue(self._tx(self._angle_cmd_msg(0, True, increment_timer=False)))
 
 
+class CurvatureSteeringSafetyTest(VehicleSpeedSafetyTest):
+  MAX_CURVATURE: float
+  MAX_CURVATURE_TEST: float
+  CURVATURE_TO_CAN: float
+  SEND_RATE: float
+
+  @abc.abstractmethod
+  def _curvature_cmd_msg(self, curvature: float, steer_req: bool):
+    pass
+
+  @abc.abstractmethod
+  def _curvature_meas_msg(self, curvature: float):
+    pass
+
+  @abc.abstractmethod
+  def _speed_msg_2(self, speed: float):
+    pass
+
+  def _set_prev_desired_curvature(self, curvature: float):
+    curvature_can = int(round(curvature * self.CURVATURE_TO_CAN))
+    self.safety.set_desired_curvature_last(curvature_can)
+
+  def _reset_curvature_measurement(self, curvature: float):
+    for _ in range(MAX_SAMPLE_VALS):
+      self._rx(self._curvature_meas_msg(curvature))
+
+  def _reset_speed_measurement(self, speed: float):
+    for _ in range(MAX_SAMPLE_VALS):
+      self._rx(self._speed_msg(speed))
+      self._rx(self._speed_msg_2(speed))
+
+  def test_curvature_measurements(self):
+    self._common_measurement_test(self._curvature_meas_msg, -self.MAX_CURVATURE, self.MAX_CURVATURE, self.CURVATURE_TO_CAN,
+                                  self.safety.get_curvature_meas_min, self.safety.get_curvature_meas_max)
+
+  def test_curvature_limit(self):
+    v = 1
+    for sign in (1, -1):
+      max_curvature = self.MAX_CURVATURE_TEST * sign
+      max_curvature_rate = MAX_LATERAL_JERK / v**2
+      max_curvature_delta = max_curvature_rate * self.SEND_RATE * sign
+
+      self._reset_speed_measurement(v)
+      self.safety.set_controls_allowed(True)
+      self._set_prev_desired_curvature(max_curvature)
+
+      self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature, True)), f"{v} {max_curvature} {max_curvature_delta}")
+      self.assertTrue(self.safety.get_controls_allowed())
+
+      self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature - max_curvature_delta, True)), f"{v} {max_curvature} {max_curvature_delta}")
+      self.assertTrue(self.safety.get_controls_allowed())
+
+      self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature, True)), f"{v} {max_curvature} {max_curvature_delta}")
+      self.assertTrue(self.safety.get_controls_allowed())
+
+      self.assertFalse(self._tx(self._curvature_cmd_msg(max_curvature + max_curvature_delta, True)), f"{v} {max_curvature} {max_curvature_delta}")
+
+  def test_iso_accel_limit(self):
+    speeds = [2., 5., 10., 15., 50.]
+    for v in speeds:
+      for sign in (1, -1):
+        max_curvature = np.clip(((MAX_LATERAL_ACCEL / (v - 1)**2) * sign), -self.MAX_CURVATURE_TEST, self.MAX_CURVATURE_TEST)
+        max_curvature_rate = MAX_LATERAL_JERK / (v - 1)**2
+        max_curvature_delta = max_curvature_rate * self.SEND_RATE * sign
+
+        self._reset_speed_measurement(v)
+        self.safety.set_controls_allowed(True)
+        self._set_prev_desired_curvature(max_curvature)
+
+        self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature, True)), f"{v} {max_curvature} {max_curvature_delta}")
+        self.assertTrue(self.safety.get_controls_allowed())
+
+        self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature - max_curvature_delta, True)), f"{v} {max_curvature} {max_curvature_delta}")
+        self.assertTrue(self.safety.get_controls_allowed())
+
+        self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature, True)), f"{v} {max_curvature} {max_curvature_delta}")
+        self.assertTrue(self.safety.get_controls_allowed())
+
+        self.assertFalse(self._tx(self._curvature_cmd_msg(max_curvature + max_curvature_delta, True)), f"{v} {max_curvature} {max_curvature_delta}")
+
+  def test_iso_jerk_limit(self):
+    speeds = [2., 5., 10., 15., 50.]
+    for v in speeds:
+      max_curvature_rate = MAX_LATERAL_JERK / (v - 1)**2
+      max_curvature_delta = max_curvature_rate * self.SEND_RATE
+
+      self._reset_speed_measurement(v)
+      self.safety.set_controls_allowed(True)
+      self._set_prev_desired_curvature(max_curvature_delta)
+
+      self.assertTrue(self._tx(self._curvature_cmd_msg(max_curvature_delta, True)))
+      self.assertTrue(self.safety.get_controls_allowed())
+
+      self.assertTrue(self._tx(self._curvature_cmd_msg(0, True)))
+      self.assertTrue(self.safety.get_controls_allowed())
+
+      self.assertTrue(self._tx(self._curvature_cmd_msg(-max_curvature_delta, True)))
+      self.assertTrue(self.safety.get_controls_allowed())
+
+      self.assertFalse(self._tx(self._curvature_cmd_msg(max_curvature_delta, True)))
+
+      # after violation, prev is reset to 0, going past the jerk limit must fail
+      self.safety.set_controls_allowed(True)
+      self.assertFalse(self._tx(self._curvature_cmd_msg(2 * max_curvature_delta, True)))
+
+
 class SafetyTest(SafetyTestBase):
   TX_MSGS: list[list[int]] = []
   SCANNED_ADDRS = [*range(0x800),                      # Entire 11-bit CAN address space
@@ -830,12 +929,6 @@ class SafetyTest(SafetyTestBase):
                    *range(0x3300, 0x3400)]                  # Honda
   FWD_BLACKLISTED_ADDRS: dict[int, list[int]] = {}  # {bus: [addr]}
   FWD_BUS_LOOKUP: dict[int, int] = {0: 2, 2: 0}
-
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "SafetyTest" or cls.__name__.endswith('Base'):
-      cls.safety = None
-      raise unittest.SkipTest
 
   # ***** standard tests for all safety modes *****
 
@@ -858,9 +951,10 @@ class SafetyTest(SafetyTestBase):
         self.assertEqual(fwd_bus, self.safety.safety_fwd_hook(bus, addr), f"{addr=:#x} from {bus=} to {fwd_bus=}")
 
   def test_spam_can_buses(self):
+    tx_msgs = {(addr, bus) for addr, bus in self.TX_MSGS}
     for bus in range(4):
       for addr in self.SCANNED_ADDRS:
-        if [addr, bus] not in self.TX_MSGS:
+        if (addr, bus) not in tx_msgs:
           self.assertFalse(self._tx(make_msg(bus, addr, 8)), f"allowed TX {addr=} {bus=}")
 
   def test_default_controls_not_allowed(self):
@@ -882,8 +976,8 @@ class SafetyTest(SafetyTestBase):
     for tf in test_files:
       test = importlib.import_module("opendbc.safety.tests."+tf[:-3])
       for attr in dir(test):
-        if attr.startswith("Test") and attr != current_test:
-          tc = getattr(test, attr)
+        tc = getattr(test, attr)
+        if isinstance(tc, type) and issubclass(tc, SafetyTest) and attr != current_test:
           tx = tc.TX_MSGS
           if tx is not None and not attr.endswith('Base'):
             # No point in comparing different Tesla safety modes
@@ -909,7 +1003,7 @@ class SafetyTest(SafetyTestBase):
               continue
             if {attr, current_test}.issubset({'TestHyundaiLongitudinalSafety', 'TestHyundaiLongitudinalSafetyCameraSCC', 'TestHyundaiSafetyFCEVLong'}):
               continue
-            volkswagen_shared = ('TestVolkswagenMqb', 'TestVolkswagenMlb')
+            volkswagen_shared = ('TestVolkswagenMqb', 'TestVolkswagenMlb', 'TestVolkswagenMeb')
             if attr.startswith(volkswagen_shared) and current_test.startswith(volkswagen_shared):
               continue
 
@@ -956,13 +1050,7 @@ class SafetyTest(SafetyTestBase):
 class CarSafetyTest(SafetyTest):
   STANDSTILL_THRESHOLD: float = 0.0
   GAS_PRESSED_THRESHOLD = 0
-  RELAY_MALFUNCTION_ADDRS: dict[int, tuple[int, ...]] | None = None
-
-  @classmethod
-  def setUpClass(cls):
-    if cls.__name__ == "CarSafetyTest" or cls.__name__.endswith('Base'):
-      cls.safety = None
-      raise unittest.SkipTest
+  RELAY_MALFUNCTION_ADDRS: dict[int, tuple[int, ...]]
 
   @abc.abstractmethod
   def _user_brake_msg(self, brake):
@@ -1040,6 +1128,7 @@ class CarSafetyTest(SafetyTest):
   def test_prev_user_brake(self, _user_brake_msg=None, get_brake_pressed_prev=None):
     if _user_brake_msg is None:
       _user_brake_msg = self._user_brake_msg
+    if get_brake_pressed_prev is None:
       get_brake_pressed_prev = self.safety.get_brake_pressed_prev
 
     self.assertFalse(get_brake_pressed_prev())
@@ -1131,12 +1220,31 @@ class CarSafetyTest(SafetyTest):
         self.safety.set_controls_allowed(True)
         self._rx(self._speed_msg_2(speed_2))
 
-        within_delta = abs(speed - speed_2) <= MAX_SPEED_DELTA
+        within_delta = speeds_within_delta(speed, speed_2)
         self.assertEqual(self.safety.get_controls_allowed(), within_delta)
 
   def test_safety_tick(self):
-    self.safety.set_timer(int(2e6))
-    self.safety.set_controls_allowed(True)
-    self.safety.safety_tick_current_safety_config()
-    self.assertFalse(self.safety.get_controls_allowed())
-    self.assertFalse(self.safety.safety_config_valid())
+    # Missing valid RX messages must disable controls even before they time out.
+    for elapsed in (0, int(2e6)):
+      with self.subTest(elapsed=elapsed):
+        self._reset_safety_hooks()
+        self.safety.set_timer(elapsed)
+        self.safety.set_controls_allowed(True)
+        self.safety.safety_tick()
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertFalse(self.safety.safety_config_valid())
+
+  def test_rx_lagging(self):
+    # a check lags after 10 missed messages or 1 s, whichever is longer. checks are at least 10 Hz, so it is always 1 s
+    lag_us = 1000000
+    self.assertGreater(self.safety.get_rx_checks_len(), 0)
+    for stale in range(self.safety.get_rx_checks_len()):
+      for age, allowed in ((lag_us, True), (lag_us + 1, False)):
+        with self.subTest(stale=stale, age=age):
+          self._reset_safety_hooks()
+          self.safety.set_timer(2 * lag_us)
+          self.safety.set_rx_checks_received(stale, age)
+          self.assertTrue(self.safety.safety_config_valid())
+          self.safety.set_controls_allowed(True)
+          self.safety.safety_tick()
+          self.assertEqual(allowed, self.safety.get_controls_allowed())

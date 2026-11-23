@@ -1,6 +1,6 @@
 [project]
 name = "opendbc"
-version = "0.2.1"
+version = "0.3.1"
 description = "a Python API for your car"
 license = "MIT"
 authors = [{ name = "Vehicle Researcher", email = "user@comma.ai" }]
@@ -12,19 +12,17 @@ urls = { "homepage" = "https://github.com/commaai/opendbc" }
 dependencies = [
   "numpy",
   "tqdm",
-  "pycapnp==2.1.0",
+  "pycapnp",
   "pycryptodome",
 ]
 
 [project.optional-dependencies]
 testing = [
-  "comma-car-segments @ https://huggingface.co/datasets/commaai/commaCarSegments/resolve/main/dist/comma_car_segments-0.1.0-py3-none-any.whl",
   "cffi",
   "tree-sitter",
   "tree-sitter-c",
   "gcovr",
   "unittest-parallel",
-  "hypothesis==6.47.*",
   "zstandard",
 
   # static analysis
@@ -33,13 +31,18 @@ testing = [
   "lefthook",
   "cpplint",
   "codespell",
-  "cppcheck @ git+https://github.com/commaai/dependencies.git@releases#subdirectory=cppcheck",
-]
-docs = [
-  "Jinja2",
 ]
 examples = [
   "inputs",
+]
+
+# Dependency groups (PEP 735) are not included in the published wheel.
+# Direct URL dependencies must live here because PyPI rejects uploads whose
+# `Requires-Dist` contains direct URLs.
+[dependency-groups]
+testing = [
+  "comma-car-segments @ https://huggingface.co/datasets/commaai/commaCarSegments/resolve/main/dist/comma_car_segments-0.1.0-py3-none-any.whl",
+  "cppcheck @ git+https://github.com/commaai/dependencies.git@release-cppcheck#subdirectory=cppcheck",
 ]
 
 [build-system]
@@ -92,39 +95,26 @@ flake8-implicit-str-concat.allow-multiline=false
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "numpy.mean".msg = "Sum and divide. np.mean is slow"
 
-[tool.ty.rules]
-# Ignore rules that produce false positives due to:
-# - Dynamic attributes on LibSafety (loaded from compiled C library)
-# - External dependencies not installed (panda, cereal, openpilot)
-# - capnp dynamically generated types
-possibly-missing-attribute = "ignore"
-unresolved-attribute = "ignore"
-unresolved-import = "ignore"
 
-# Intentional LSP violations in subclass method signatures
-invalid-method-override = "ignore"
+[tool.ty.environment]
+# examples are scripts that import their siblings
+extra-paths = ["examples"]
 
-# Optional callables called without None checks in test code
-call-non-callable = "ignore"
+[tool.ty.analysis]
+# compiled extension without type information
+replace-imports-with-any = ["capnp", "capnp.**"]
+# optional, not installed here
+allowed-unresolved-imports = ["panda", "openpilot.**"]
 
-# Complex type narrowing ty doesn't handle well (isinstance with abstract types)
-invalid-argument-type = "ignore"
-
-# Dynamic type patterns (e.g., values converted from Number to list in __init__)
-not-subscriptable = "ignore"
-unsupported-operator = "ignore"
-
-# Return types with complex callable signatures
-invalid-return-type = "ignore"
-
-# unittest TestSuite iteration (TestCase | TestSuite is always iterable in practice)
-not-iterable = "ignore"
-
-# Test class method signature differences
-too-many-positional-arguments = "ignore"
+# test helpers that build messages narrow or rename the base class's parameters
+[[tool.ty.overrides]]
+include = ["opendbc/safety/tests/**"]
+rules = { incompatible-method-override = "ignore", lost-keyword-for-regular-parameter = "ignore" }
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.package-data]
-"opendbc.safety" = ["*.h", "board/*.h", "board/drivers/*.h", "modes/*.h"]
+"opendbc.car" = ["**/*.capnp", "**/*.toml"]
+"opendbc.dbc" = ["**/*.dbc"]
+"opendbc.safety" = ["*.h", "modes/*.h"]

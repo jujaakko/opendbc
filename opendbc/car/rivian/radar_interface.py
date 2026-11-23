@@ -17,38 +17,16 @@ def get_radar_can_parser(CP):
 class RadarInterface(RadarInterfaceBase):
   def __init__(self, CP):
     super().__init__(CP)
-    self.updated_messages = set()
+    self.rcp = None if CP.radarUnavailable else get_radar_can_parser(CP)
     self.trigger_msg = RADAR_START_ADDR + RADAR_MSG_COUNT - 1
-    self.track_id = 0
 
-    self.radar_off_can = CP.radarUnavailable
-    self.rcp = get_radar_can_parser(CP)
-
-  def update(self, can_strings):
-    if self.radar_off_can or (self.rcp is None):
-      return super().update(None)
-
-    vls = self.rcp.update(can_strings)
-    self.updated_messages.update(vls)
-
-    if self.trigger_msg not in self.updated_messages:
-      return None
-
-    rr = self._update(self.updated_messages)
-    self.updated_messages.clear()
-
-    return rr
-
-  def _update(self, updated_messages):
+  def _update(self, rcp, updated_messages):
     ret = structs.RadarData()
-    if self.rcp is None:
-      return ret
-
-    if not self.rcp.can_valid:
+    if not rcp.can_valid:
       ret.errors.canError = True
 
     for addr in range(RADAR_START_ADDR, RADAR_START_ADDR + RADAR_MSG_COUNT):
-      msg = self.rcp.vl[f"RADAR_TRACK_{addr:x}"]
+      msg = rcp.vl[f"RADAR_TRACK_{addr:x}"]
 
       # STATE: 1=New, 2=New_updated, 3=Updated, 4=Coasting, 7=New_coasting
       valid = msg['STATE'] in (1, 2, 3, 4, 7)
@@ -63,13 +41,10 @@ class RadarInterface(RadarInterfaceBase):
           self.pts[addr].trackId = self.track_id
           self.track_id += 1
 
-        self.pts[addr].measured = msg['STATE'] in (2, 3)
         azimuth = math.radians(msg['AZIMUTH'])
         self.pts[addr].dRel = math.cos(azimuth) * msg['LONG_DIST']
-        self.pts[addr].yRel = 0.5 * -math.sin(azimuth) * msg['LONG_DIST']
+        self.pts[addr].yRel = -math.sin(azimuth) * msg['LONG_DIST']
         self.pts[addr].vRel = msg['REL_SPEED']
-        self.pts[addr].aRel = float('nan')
-        self.pts[addr].yvRel = float('nan')
       elif addr in self.pts:
         del self.pts[addr]
 
