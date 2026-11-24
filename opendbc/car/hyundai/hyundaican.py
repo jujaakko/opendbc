@@ -199,14 +199,28 @@ def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, se
 
   commands.append(packer.make_can_msg("SCC12", 0, scc12_values))
 
-  scc14_values = {
-    "ComfortBandUpper": 0.0, # stock usually is 0 but sometimes uses higher values
-    "ComfortBandLower": 0.0, # stock usually is 0 but sometimes uses higher values
-    "JerkUpperLimit": upper_jerk, # stock usually is 1.0 but sometimes uses higher values
-    "JerkLowerLimit": 5.0, # stock usually is 0.5 but sometimes uses higher values
-    "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
-    "ObjGap": 2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
-  }
+  if CP.carFingerprint == CAR.KIA_CEED_PHEV:
+    # Ceed PHEV uses pre-2021 SCC14 ComfortBand encoding (scale 0.0986, offset -4.14; raw 42 = 0.0 m/s^2).
+    # Sending 0.0 (raw 0 = -4.14 m/s^2) causes ESC to continuously brake to a full stop.
+    band_raw = max(0, min(63, round(((accel if enabled else 0.0) + 4.14) / 0.0986)))
+    band_dbc = band_raw * 0.02
+    scc14_values = {
+      "ComfortBandUpper": band_dbc,
+      "ComfortBandLower": band_dbc,
+      "JerkUpperLimit": 9.2 if enabled else 3.1,
+      "JerkLowerLimit": 0.0,
+      "ACCMode": 2 if enabled and long_override else 1 if enabled else 4,
+      "ObjGap": 2 if hud_control.leadVisible else 0,
+    }
+  else:
+    scc14_values = {
+      "ComfortBandUpper": 0.0, # stock usually is 0 but sometimes uses higher values
+      "ComfortBandLower": 0.0, # stock usually is 0 but sometimes uses higher values
+      "JerkUpperLimit": upper_jerk, # stock usually is 1.0 but sometimes uses higher values
+      "JerkLowerLimit": 5.0, # stock usually is 0.5 but sometimes uses higher values
+      "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
+      "ObjGap": 2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
+    }
   commands.append(packer.make_can_msg("SCC14", 0, scc14_values))
 
   # Only send FCA11 on cars where it exists on the bus

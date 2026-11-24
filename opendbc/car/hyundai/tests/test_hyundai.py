@@ -294,6 +294,30 @@ class TestCeedPhevWorkarounds(unittest.TestCase):
       nibble_sum = sum(sum(divmod(b, 16)) for b in dat[:7]) + (dat[7] & 0xF)
       assert (dat[7] >> 4) == ((0x10 - nibble_sum % 0x10) & 0xF)
 
+  def test_create_scc14_comfort_band_encoding(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import structs
+    from opendbc.car.hyundai.hyundaican import create_acc_commands
+
+    CP = CarInterface.get_params(CAR.KIA_CEED_PHEV, gen_empty_fingerprint(), [], True, False, False)
+    packer = CANPacker("hyundai_can_generated")
+    hud = structs.CarControl.HUDControl.new_message()
+
+    # Idle standby: must match stock Ceed PHEV SCC14 exactly (aa fa 01 00 04 00 00 00)
+    cmds_idle = create_acc_commands(packer, False, 0.0, 1.0, 0, hud, 0.0, False, False, True, CP)
+    scc14_idle = [c for c in cmds_idle if c[0] == 0x389][0]
+    assert scc14_idle[1] == bytes.fromhex("aa fa 01 00 04 00 00 00")
+
+    # Active cruise at 0.0 m/s^2: must match stock (aa ca 05 00 01 00 00 00)
+    cmds_zero = create_acc_commands(packer, True, 0.0, 3.0, 0, hud, 50.0, False, False, True, CP)
+    scc14_zero = [c for c in cmds_zero if c[0] == 0x389][0]
+    assert scc14_zero[1] == bytes.fromhex("aa ca 05 00 01 00 00 00")
+
+    # Active acceleration at +0.56 m/s^2: must match stock (30 cc 05 00 01 00 00 00)
+    cmds_acc = create_acc_commands(packer, True, 0.56, 3.0, 0, hud, 60.0, False, False, True, CP)
+    scc14_acc = [c for c in cmds_acc if c[0] == 0x389][0]
+    assert scc14_acc[1] == bytes.fromhex("30 cc 05 00 01 00 00 00")
+
   def test_create_mdps12_checksum_and_toi(self):
     from opendbc.can import CANPacker, CANParser
     from opendbc.car.hyundai.hyundaican import create_mdps12
